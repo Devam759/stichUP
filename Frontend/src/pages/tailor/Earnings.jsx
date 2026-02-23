@@ -3,6 +3,8 @@ import TailorLayout from '../../layouts/TailorLayout'
 import Card from '../../components/ui/Card'
 import PrimaryButton from '../../components/ui/PrimaryButton'
 import { FiCalendar } from 'react-icons/fi'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
+import { db } from '../../firebase'
 
 const Row = ({ label, value }) => (
   <div className="flex items-center justify-between py-2 border-b last:border-b-0 border-neutral-200">
@@ -11,35 +13,51 @@ const Row = ({ label, value }) => (
   </div>
 )
 
-// Sample daily payment history data
-const sampleDailyHistory = [
-  { date: '2024-01-15', paymentsCount: 5, totalAmount: 3240, availableToWithdraw: 3240 },
-  { date: '2024-01-14', paymentsCount: 3, totalAmount: 1890, availableToWithdraw: 5130 },
-  { date: '2024-01-13', paymentsCount: 7, totalAmount: 4120, availableToWithdraw: 9250 },
-  { date: '2024-01-12', paymentsCount: 4, totalAmount: 2450, availableToWithdraw: 11700 },
-  { date: '2024-01-11', paymentsCount: 6, totalAmount: 3480, availableToWithdraw: 15180 },
-  { date: '2024-01-10', paymentsCount: 2, totalAmount: 1200, availableToWithdraw: 16380 },
-]
 
 const Earnings = () => {
-  const [dailyHistory, setDailyHistory] = useState(sampleDailyHistory)
-  const [totalWallet, setTotalWallet] = useState(12540)
-  const [totalAvailable, setTotalAvailable] = useState(12540)
+  const [dailyHistory, setDailyHistory] = useState([])
+  const [totalWallet, setTotalWallet] = useState(0)
+  const [totalAvailable, setTotalAvailable] = useState(0)
 
   useEffect(() => {
-    // Load payment history from localStorage if available
+    let unsub = null
     try {
-      const history = JSON.parse(localStorage.getItem('tailorPaymentHistory') || '[]')
-      if (history.length > 0) {
-        setDailyHistory(history)
-        // Calculate total available from history
-        const available = history.length > 0 ? history[0].availableToWithdraw : 0
-        setTotalAvailable(available)
-        setTotalWallet(available)
-      }
-    } catch (error) {
-      console.error('Error loading payment history:', error)
-    }
+      const u = JSON.parse(localStorage.getItem('currentUser') || '{}')
+      const tailorId = u.phone || u.id
+      if (!tailorId) return
+
+      const q = query(collection(db, 'orders'), where('tailorId', '==', tailorId))
+      unsub = onSnapshot(q, (snapshot) => {
+        const orders = snapshot.docs.map(d => d.data())
+
+        // Aggregate earnings
+        let gross = 0
+        const mapByDate = {}
+
+        for (const o of orders) {
+          if (o.status !== 'Request' && o.status !== 'Rejected') {
+            const price = Number(o.priceFrom) || 150
+            gross += price
+
+            const dateObj = new Date(o.createdAt || Date.now())
+            const dayKey = dateObj.toISOString().split('T')[0]
+
+            if (!mapByDate[dayKey]) {
+              mapByDate[dayKey] = { date: dayKey, paymentsCount: 0, totalAmount: 0 }
+            }
+            mapByDate[dayKey].paymentsCount += 1
+            mapByDate[dayKey].totalAmount += price
+          }
+        }
+
+        const historyArray = Object.values(mapByDate).sort((a, b) => b.date.localeCompare(a.date))
+        setDailyHistory(historyArray)
+        setTotalWallet(gross)
+        setTotalAvailable(gross)
+      })
+    } catch (e) { console.error('Error loading earnings', e) }
+
+    return () => { if (unsub) unsub() }
   }, [])
 
   const formatDate = (dateString) => {
@@ -58,10 +76,9 @@ const Earnings = () => {
         </Card>
         <Card className="p-5 lg:col-span-2">
           <div className="text-lg font-semibold mb-3">Earnings Summary</div>
-          <Row label="Today" value="₹3,240" />
-          <Row label="This Week" value="₹18,420" />
-          <Row label="This Month" value="₹62,870" />
-          <Row label="Platform Commission" value="₹6,287" />
+          <Row label="Total Value" value={`₹${totalWallet.toLocaleString('en-IN')}`} />
+          <Row label="Estimated Delivery Payout" value={`₹${Math.round(totalWallet * 0.9).toLocaleString('en-IN')}`} />
+          <Row label="Platform Commission" value={`₹${Math.round(totalWallet * 0.1).toLocaleString('en-IN')}`} />
         </Card>
       </div>
 
@@ -71,7 +88,7 @@ const Earnings = () => {
           <FiCalendar className="w-5 h-5 text-[color:var(--color-primary)]" />
           <div className="text-lg font-semibold">Daily Payment History</div>
         </div>
-        
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -103,7 +120,7 @@ const Earnings = () => {
               ))}
             </tbody>
           </table>
-          
+
           {dailyHistory.length === 0 && (
             <div className="text-center py-8 text-neutral-500">
               No payment history available

@@ -7,6 +7,8 @@ import PrimaryButton from '../components/ui/PrimaryButton'
 import Input from '../components/ui/Input'
 import { FiPhone, FiMessageCircle, FiCheck, FiX } from 'react-icons/fi'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore'
+import { db } from '../firebase'
 
 const Step = ({ label, active, done, time }) => {
   return (
@@ -16,7 +18,7 @@ const Step = ({ label, active, done, time }) => {
         <div className="w-0.5 flex-1 bg-neutral-200 my-1 last:hidden" />
       </div>
       <div>
-        <div className={["text-sm", (done||active) ? 'text-[color:var(--color-text)] font-medium' : 'text-neutral-500'].join(' ')}>{label}</div>
+        <div className={["text-sm", (done || active) ? 'text-[color:var(--color-text)] font-medium' : 'text-neutral-500'].join(' ')}>{label}</div>
         <div className="text-xs text-neutral-500">{time || '—'}</div>
       </div>
     </div>
@@ -56,27 +58,27 @@ const OrderTracking = () => {
     }
   }, [location.state])
 
-  // Load order status from localStorage
+  // Load order status from Firebase
   useEffect(() => {
-    try {
-      const orders = JSON.parse(localStorage.getItem('customerOrders') || '[]')
-      const order = orders.find(o => o.id === orderId)
-      if (order) {
+    if (!orderId || orderId === 'ST-2049') return // Ignore mock
+    const unsub = onSnapshot(doc(db, 'orders', orderId), (docSnap) => {
+      if (docSnap.exists()) {
+        const order = docSnap.data()
         if (order.status === 'Ready' && !order.satisfactionStatus) {
           setSatisfactionModalOpen(true)
           setStatusIndex(3)
         } else if (order.status === 'Not Satisfied') {
-          setStatusIndex(2) // Back to In Progress
+          setStatusIndex(2)
         } else if (order.status === 'Satisfied' && order.deliveryScheduled) {
-          // Delivery scheduled, show schedule info
           setDeliveryDate(order.deliveryDate)
           setDeliveryTime(order.deliveryTime)
           setShowDeliverySchedule(true)
         }
       }
-    } catch (error) {
-      console.error('Error loading order:', error)
-    }
+    }, (error) => {
+      console.error('Error tracking order:', error)
+    })
+    return () => unsub()
   }, [orderId])
 
   // After assigning rider, auto-complete delivery
@@ -96,33 +98,24 @@ const OrderTracking = () => {
     return () => clearInterval(tick)
   }, [rider])
 
-  const handleSatisfaction = (satisfied) => {
+  const handleSatisfaction = async (satisfied) => {
     setIsSatisfied(satisfied)
-    
+
     if (!satisfied) {
       // Not satisfied - send back to tailor
       try {
-        const orders = JSON.parse(localStorage.getItem('customerOrders') || '[]')
-        const orderIndex = orders.findIndex(o => o.id === orderId)
-        if (orderIndex >= 0) {
-          orders[orderIndex].status = 'Not Satisfied'
-          orders[orderIndex].satisfactionStatus = false
-          orders[orderIndex].notSatisfiedAt = new Date().toISOString()
-          localStorage.setItem('customerOrders', JSON.stringify(orders))
-        }
-        
-        // Also update tailor orders
-        const tailorOrders = JSON.parse(localStorage.getItem('tailorOrders') || '[]')
-        const tailorOrderIndex = tailorOrders.findIndex(o => o.id === orderId)
-        if (tailorOrderIndex >= 0) {
-          tailorOrders[tailorOrderIndex].status = 'Not Satisfied'
-          tailorOrders[tailorOrderIndex].needsRevision = true
-          localStorage.setItem('tailorOrders', JSON.stringify(tailorOrders))
+        if (orderId !== 'ST-2049') {
+          await updateDoc(doc(db, 'orders', orderId), {
+            status: 'Not Satisfied',
+            satisfactionStatus: false,
+            notSatisfiedAt: new Date().toISOString(),
+            needsRevision: true
+          })
         }
       } catch (error) {
         console.error('Error updating order:', error)
       }
-      
+
       setStatusIndex(2) // Back to In Progress
       setSatisfactionModalOpen(false)
       alert('Your feedback has been sent to the tailor. They will work on the changes.')
@@ -132,22 +125,21 @@ const OrderTracking = () => {
     }
   }
 
-  const handleScheduleDelivery = () => {
+  const handleScheduleDelivery = async () => {
     if (!deliveryDate || !deliveryTime) {
       alert('Please select both date and time for delivery')
       return
     }
 
     try {
-      const orders = JSON.parse(localStorage.getItem('customerOrders') || '[]')
-      const orderIndex = orders.findIndex(o => o.id === orderId)
-      if (orderIndex >= 0) {
-        orders[orderIndex].status = 'Satisfied'
-        orders[orderIndex].satisfactionStatus = true
-        orders[orderIndex].deliveryScheduled = true
-        orders[orderIndex].deliveryDate = deliveryDate
-        orders[orderIndex].deliveryTime = deliveryTime
-        localStorage.setItem('customerOrders', JSON.stringify(orders))
+      if (orderId !== 'ST-2049') {
+        await updateDoc(doc(db, 'orders', orderId), {
+          status: 'Satisfied',
+          satisfactionStatus: true,
+          deliveryScheduled: true,
+          deliveryDate,
+          deliveryTime
+        })
       }
     } catch (error) {
       console.error('Error scheduling delivery:', error)
@@ -182,8 +174,8 @@ const OrderTracking = () => {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button className="btn-outline inline-flex items-center gap-2"><FiPhone/> Call</button>
-                <button className="btn-outline inline-flex items-center gap-2"><FiMessageCircle/> Chat</button>
+                <button className="btn-outline inline-flex items-center gap-2"><FiPhone /> Call</button>
+                <button className="btn-outline inline-flex items-center gap-2"><FiMessageCircle /> Chat</button>
               </div>
             </div>
             <div className="mt-3 inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)] text-sm">
@@ -193,9 +185,9 @@ const OrderTracking = () => {
 
           <Card className="p-5">
             <div className="text-lg font-semibold mb-3">Status</div>
-            <div className="grid" style={{gridTemplateColumns: 'auto 1fr', gap: '8px'}}>
+            <div className="grid" style={{ gridTemplateColumns: 'auto 1fr', gap: '8px' }}>
               {steps.map((s, i) => (
-                <Step key={i} label={s.label} time={s.time} active={i===statusIndex} done={i<statusIndex} />
+                <Step key={i} label={s.label} time={s.time} active={i === statusIndex} done={i < statusIndex} />
               ))}
             </div>
           </Card>
@@ -236,7 +228,7 @@ const OrderTracking = () => {
               <div className="text-neutral-600 text-sm">{rider.name} • {rider.vehicle}</div>
               <div className="text-neutral-600 text-sm mt-1">Phone: {rider.phone}</div>
               <div className="mt-3 inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)] text-sm">
-                ETA {Math.floor(etaSec/60)}:{String(etaSec%60).padStart(2,'0')} min
+                ETA {Math.floor(etaSec / 60)}:{String(etaSec % 60).padStart(2, '0')} min
               </div>
               <a href={`tel:${rider.phone.replace(/\s/g, '')}`} className="btn-primary mt-3 inline-flex items-center gap-2">Call rider</a>
             </Card>
@@ -247,12 +239,12 @@ const OrderTracking = () => {
       {/* Satisfaction Feedback Modal */}
       {satisfactionModalOpen && (
         <div className="fixed inset-0 z-50">
-          <div className="absolute inset-0 bg-black/40" onClick={() => {}} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { }} />
           <div className="absolute inset-0 grid place-items-center px-4">
             <Card className="p-6 w-full max-w-md">
               <div className="text-lg font-semibold mb-2">Order Ready - Are you satisfied?</div>
               <div className="text-neutral-600 text-sm mb-4">The tailor has marked your order as ready. Please review the completed work.</div>
-              
+
               {proofAvailable && location.state?.photos && (
                 <div className="mb-4">
                   <div className="text-sm font-medium mb-2">Completion Photos</div>

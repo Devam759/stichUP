@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Link, useNavigate } from 'react-router-dom'
 import { FiUser, FiBell, FiPackage, FiMessageCircle, FiMessageSquare } from 'react-icons/fi'
+import { collection, query, where, onSnapshot } from 'firebase/firestore'
+import { db } from '../firebase'
 
 const Navbar = ({ hideUntilScroll = false }) => {
   const [isVisible, setIsVisible] = useState(!hideUntilScroll)
@@ -11,7 +13,23 @@ const Navbar = ({ hideUntilScroll = false }) => {
   const [pendingOrders, setPendingOrders] = useState([])
   const [newEnquiries, setNewEnquiries] = useState([])
   const notificationsRef = useRef(null)
+  const userMenuRef = useRef(null)
+  const [showUserMenu, setShowUserMenu] = useState(false)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    const handleClickOutsideUserMenu = (event) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setShowUserMenu(false)
+      }
+    }
+    if (showUserMenu) {
+      document.addEventListener('mousedown', handleClickOutsideUserMenu)
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutsideUserMenu)
+    }
+  }, [showUserMenu])
 
   useEffect(() => {
     if (!hideUntilScroll) return
@@ -49,15 +67,15 @@ const Navbar = ({ hideUntilScroll = false }) => {
         setUser(null)
       }
     }
-    
+
     checkUser()
     // Listen for storage changes (when user logs in/out in another tab)
     window.addEventListener('storage', checkUser)
-    
+
     // Also trigger check when navigating (by listening to custom event)
     const handleAuthChange = () => checkUser()
     window.addEventListener('authChange', handleAuthChange)
-    
+
     return () => {
       window.removeEventListener('storage', checkUser)
       window.removeEventListener('authChange', handleAuthChange)
@@ -78,39 +96,38 @@ const Navbar = ({ hideUntilScroll = false }) => {
 
   // Load pending orders and new enquiries
   useEffect(() => {
-    const loadNotifications = () => {
-      if (user && user.role === 'tailor') {
-        try {
-          // Load pending orders (status === 'Request')
-          const orders = JSON.parse(localStorage.getItem('tailorOrders') || '[]')
+    let unsubOrders = null
+    let unsubEnquiries = null
+
+    if (user && user.role === 'tailor') {
+      const tailorId = user?.phone || user?.id
+      if (tailorId) {
+        // live orders
+        const qOrders = query(collection(db, 'orders'), where('tailorId', '==', tailorId))
+        unsubOrders = onSnapshot(qOrders, (snapshot) => {
+          const orders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
           const pending = orders.filter(o => o.status === 'Request' || o.status === 'Pending')
           setPendingOrders(pending)
+        })
 
-          // Load new enquiries (unread messages from customers) for this tailor
-          const tailorId = user?.phone || user?.id
-          if (tailorId) {
-            const enquiries = JSON.parse(localStorage.getItem('tailorEnquiries') || '[]')
-            // Filter enquiries for this tailor where the last message is from 'customer'
-            const newEnqs = enquiries.filter(e => {
-              if (!e.messages || e.messages.length === 0) return false
-              const messageTailorId = (e.tailorId || '').replace(/\D/g, '')
-              const currentTailorId = (tailorId || '').replace(/\D/g, '')
-              if (messageTailorId !== currentTailorId) return false
-              const lastMessage = e.messages[e.messages.length - 1]
-              return lastMessage.from === 'customer' || lastMessage.from === 'user'
-            })
-            setNewEnquiries(newEnqs)
-          }
-        } catch (error) {
-          console.error('Error loading notifications:', error)
-        }
+        // live enquiries
+        const qEnquiries = query(collection(db, 'enquiries'), where('tailorId', '==', tailorId))
+        unsubEnquiries = onSnapshot(qEnquiries, (snapshot) => {
+          const enquiries = snapshot.docs.map(doc => doc.data())
+          const newEnqs = enquiries.filter(e => {
+            if (!e.messages || e.messages.length === 0) return false
+            const lastMessage = e.messages[e.messages.length - 1]
+            return lastMessage.from === 'customer' || lastMessage.from === 'user'
+          })
+          setNewEnquiries(newEnqs)
+        })
       }
     }
 
-    loadNotifications()
-    // Refresh notifications periodically
-    const interval = setInterval(loadNotifications, 5000)
-    return () => clearInterval(interval)
+    return () => {
+      if (unsubOrders) unsubOrders()
+      if (unsubEnquiries) unsubEnquiries()
+    }
   }, [user])
 
   // Close notifications when clicking outside
@@ -143,7 +160,7 @@ const Navbar = ({ hideUntilScroll = false }) => {
   return (
     <header className={[positionClass, 'top-0 left-0 right-0 w-full z-40 bg-[#305cde] border-b border-transparent transition-all duration-300'].join(' ') + ' ' + visibilityClass}>
       <motion.div
-        className="w-full px-4 h-16 grid grid-cols-[1fr_auto_1fr] items-center gap-3"
+        className="mx-auto w-full max-w-6xl px-4 h-16 grid grid-cols-[1fr_auto_1fr] items-center gap-3"
         initial={playEntrance ? { opacity: 0 } : false}
         animate={{ opacity: isVisible ? 1 : 0 }}
         transition={{ duration: 0.25, ease: 'easeOut' }}
@@ -177,48 +194,66 @@ const Navbar = ({ hideUntilScroll = false }) => {
           {user ? (
             user.role === 'customer' ? (
               <>
-                <Link 
-                  to="/customer/account"
-                  className="inline-flex items-center justify-center px-4 py-2 text-white font-medium hover:text-white/80 transition-colors"
-                >
-                  My Account
-                </Link>
-                <Link 
-                  to="/customer/orders"
-                  className="inline-flex items-center justify-center px-4 py-2 text-white font-medium hover:text-white/80 transition-colors"
-                >
-                  Orders
-                </Link>
-                <Link 
-                  to="/enquiries"
-                  className="inline-flex items-center justify-center px-4 py-2 text-white font-medium hover:text-white/80 transition-colors"
-                >
-                  Enquiries
-                </Link>
-                <Link 
+                <Link
                   to="/cart"
-                  className="inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors relative"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors relative"
+                  title="Cart"
                 >
                   <span className="text-xl">🛒</span>
-                  <span>Cart</span>
                 </Link>
+                <div className="relative" ref={userMenuRef}>
+                  <button
+                    onClick={() => setShowUserMenu(!showUserMenu)}
+                    className="inline-flex items-center justify-center rounded-full p-2 text-white hover:bg-white/20 transition-colors relative flex-shrink-0"
+                    title="Account"
+                  >
+                    <FiUser className="w-5 h-5" />
+                  </button>
+                  {showUserMenu && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-neutral-200 z-50 overflow-hidden flex flex-col py-1">
+                      <div className="px-4 py-3 border-b border-neutral-100 mb-1">
+                        <p className="text-sm font-medium text-neutral-900 truncate">Hi, {user.name || 'Customer'}</p>
+                      </div>
+                      <Link
+                        to="/customer/account"
+                        onClick={() => setShowUserMenu(false)}
+                        className="px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-[color:var(--color-primary)] transition-colors"
+                      >
+                        My Account
+                      </Link>
+                      <Link
+                        to="/customer/orders"
+                        onClick={() => setShowUserMenu(false)}
+                        className="px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-[color:var(--color-primary)] transition-colors"
+                      >
+                        Orders
+                      </Link>
+                      <Link
+                        to="/enquiries"
+                        onClick={() => setShowUserMenu(false)}
+                        className="px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-[color:var(--color-primary)] transition-colors"
+                      >
+                        Enquiries
+                      </Link>
+                      <div className="border-t border-neutral-100 my-1"></div>
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          handleLogout()
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <>
-                <Link 
-                  to="/tailor/earnings"
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2 text-white font-semibold hover:text-white/80 transition-colors"
-                >
-                  <span>Today's Earnings: ₹{earnings}</span>
-                </Link>
-                <Link 
-                  to="/tailor/enquiries"
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2 text-white font-medium hover:text-white/80 transition-colors"
-                  title="Enquiries"
-                >
-                  <FiMessageSquare className="w-5 h-5" />
-                  <span className="hidden sm:inline">Enquiries</span>
-                </Link>
+                <div className="hidden sm:inline-flex items-center justify-center gap-2 px-3 py-2 text-white font-medium">
+                  <span>₹{earnings} Earned</span>
+                </div>
                 <div className="relative" ref={notificationsRef}>
                   <button
                     onClick={() => setShowNotifications(!showNotifications)}
@@ -230,7 +265,7 @@ const Navbar = ({ hideUntilScroll = false }) => {
                       <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
                     )}
                   </button>
-                  
+
                   {showNotifications && (
                     <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-lg border border-neutral-200 z-40 max-h-96 overflow-hidden flex flex-col">
                       <div className="p-4 border-b border-neutral-200">
@@ -280,24 +315,24 @@ const Navbar = ({ hideUntilScroll = false }) => {
                                 )}
                               </div>
                             )}
-                            
+
                             {newEnquiries.length > 0 && (
                               <div className="p-2 border-t border-neutral-200">
                                 <div className="px-3 py-2 text-xs font-semibold text-neutral-600 uppercase tracking-wide">
                                   New Enquiries ({newEnquiries.length})
                                 </div>
                                 {newEnquiries.slice(0, 3).map((enquiry) => {
-                                  const lastMessage = enquiry.messages && enquiry.messages.length > 0 
+                                  const lastMessage = enquiry.messages && enquiry.messages.length > 0
                                     ? enquiry.messages[enquiry.messages.length - 1]
                                     : null
-                                  const preview = lastMessage 
+                                  const preview = lastMessage
                                     ? (lastMessage.type === 'voice' ? '🎤 Voice message' : (lastMessage.text || '').substring(0, 50))
                                     : 'New enquiry'
-                                  
+
                                   return (
                                     <Link
                                       key={enquiry.customerId || enquiry.tailorId}
-                                      to={enquiry.customerId 
+                                      to={enquiry.customerId
                                         ? `/tailor/enquiries?customerId=${enquiry.customerId}&customerName=${encodeURIComponent(enquiry.customerName || 'Customer')}`
                                         : `/tailor/enquiries`}
                                       onClick={() => setShowNotifications(false)}
@@ -332,25 +367,63 @@ const Navbar = ({ hideUntilScroll = false }) => {
                     </div>
                   )}
                 </div>
-                <Link 
-                  to="/tailor/profile"
-                  onClick={(e) => {
-                    // Ensure notifications close when clicking profile
-                    setShowNotifications(false)
-                    navigate('/tailor/profile')
-                  }}
-                  className="inline-flex items-center justify-center rounded-full p-2 text-white hover:bg-white/20 transition-colors relative z-10"
-                  title="Profile"
-                >
-                  <FiUser className="w-5 h-5" />
-                </Link>
+                <div className="relative" ref={userMenuRef}>
+                  <button
+                    onClick={() => {
+                      setShowNotifications(false)
+                      setShowUserMenu(!showUserMenu)
+                    }}
+                    className="inline-flex items-center justify-center rounded-full p-2 text-white hover:bg-white/20 transition-colors relative z-10"
+                    title="Account"
+                  >
+                    <FiUser className="w-5 h-5" />
+                  </button>
+                  {showUserMenu && (
+                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-neutral-200 z-50 overflow-hidden flex flex-col py-1">
+                      <div className="px-4 py-3 border-b border-neutral-100 mb-1">
+                        <p className="text-sm font-medium text-neutral-900 truncate">Hi, {user.name || 'Tailor'}</p>
+                      </div>
+                      <Link
+                        to="/tailor/profile"
+                        onClick={() => setShowUserMenu(false)}
+                        className="px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-[color:var(--color-primary)] transition-colors"
+                      >
+                        Profile
+                      </Link>
+                      <Link
+                        to="/tailor/enquiries"
+                        onClick={() => setShowUserMenu(false)}
+                        className="px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-[color:var(--color-primary)] transition-colors"
+                      >
+                        Enquiries
+                      </Link>
+                      <Link
+                        to="/tailor/earnings"
+                        onClick={() => setShowUserMenu(false)}
+                        className="sm:hidden px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 hover:text-[color:var(--color-primary)] transition-colors"
+                      >
+                        Earnings
+                      </Link>
+                      <div className="border-t border-neutral-100 my-1"></div>
+                      <button
+                        onClick={() => {
+                          setShowUserMenu(false)
+                          handleLogout()
+                        }}
+                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                        Logout
+                      </button>
+                    </div>
+                  )}
+                </div>
               </>
             )
           ) : (
-            <>
-              <Link to="/login" className="inline-flex items-center justify-center rounded-xl px-4 py-2 bg-black text-white font-semibold hover:bg-neutral-900 transition-colors">Login</Link>
-              <Link to="/signup" className="inline-flex items-center justify-center rounded-xl px-4 py-2 bg-black text-white font-semibold hover:bg-neutral-900 transition-colors">Sign up</Link>
-            </>
+            <div className="flex items-center gap-3">
+              <Link to="/signup" className="inline-flex items-center justify-center rounded-lg px-5 py-2 bg-[#3770FF] text-white font-semibold hover:bg-[#2c5ad1] transition-colors">Join Stitchup</Link>
+              <Link to="/login" className="inline-flex items-center justify-center rounded-lg px-5 py-2 bg-white text-neutral-800 font-semibold border border-neutral-200 hover:bg-neutral-50 transition-colors">Login</Link>
+            </div>
           )}
         </motion.div>
       </motion.div>

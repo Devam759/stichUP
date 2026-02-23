@@ -1,0 +1,64 @@
+type User @table {
+  phoneNumber: String!
+  role: String! # "Customer" or "Tailor"
+  createdAt: Timestamp!
+  displayName: String
+  email: String
+  photoUrl: String
+  address: String
+  profileBio: String
+}
+
+type Service @table {
+  name: String!
+  basePrice: Float!
+  createdAt: Timestamp!
+  description: String
+  estimatedDuration: String
+}
+
+type TailorService @table(key: ["tailor", "service"]) {
+  tailor: User!
+  service: Service!
+  price: Float!
+  availabilityNotes: String
+}
+
+type Order @table {
+  customer: User!
+  orderDate: Timestamp!
+  status: String! # "Pending", "PickedUp", "InProgress", "Completed", "Delivered"
+  totalPrice: Float!
+  tailor: User
+  pickUpAddress: String
+  deliveryAddress: String
+  specialInstructions: String
+  deliveryDate: Timestamp
+  completionDate: Timestamp
+}
+
+type OrderItem @table(key: ["order", "service"]) {
+  order: Order!
+  service: Service!
+  quantity: Int!
+  itemPrice: Float!
+  notes: String
+}
+
+type Message @table {
+  sender: User!
+  receiver: User!
+  order: Order!
+  content: String!
+  timestamp: Timestamp!
+  isRead: Boolean
+}
+
+type Review @table(key: ["customer", "tailor", "order"]) {
+  customer: User!
+  tailor: User!
+  order: Order!
+  rating: Int! # 1-5 stars
+  createdAt: Timestamp!
+  comment: String
+}

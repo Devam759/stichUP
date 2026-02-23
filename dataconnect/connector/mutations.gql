@@ -1,0 +1,26 @@
+mutation CreateUser($phone: String!, $role: String!, $name: String) @auth(level: PUBLIC) {
+  user_insert(
+    data: {
+      phoneNumber: $phone,
+      role: $role,
+      displayName: $name,
+      createdAt: { today: true }
+    }
+  )
+}
+
+mutation CreateOrder(
+  $customerPhone: String!, 
+  $tailorPhone: String!, 
+  $price: Float!
+) @auth(level: PUBLIC) {
+  order_insert(
+    data: {
+      customer: { phoneNumber: $customerPhone },
+      tailor: { phoneNumber: $tailorPhone },
+      status: "Pending",
+      totalPrice: $price,
+      orderDate: { today: true }
+    }
+  )
+}

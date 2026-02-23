@@ -1,0 +1,5 @@
+connectorId: "frontend-connector"
+generate:
+  javascriptSdk:
+    outputDir: "../../src/dataconnect"
+    package: "@stichup/dataconnect"

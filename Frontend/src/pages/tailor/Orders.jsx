@@ -3,6 +3,8 @@ import TailorLayout from '../../layouts/TailorLayout'
 import Card from '../../components/ui/Card'
 import PrimaryButton from '../../components/ui/PrimaryButton'
 import { FiX, FiCamera, FiUpload, FiImage } from 'react-icons/fi'
+import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore'
+import { db } from '../../firebase'
 
 const sample = [
   { id: 'ST-2001', user: 'Aarav', service: 'Alter', cloth: 'Pant', slot: '11:00-12:00', status: 'Accepted' },
@@ -10,17 +12,21 @@ const sample = [
 ]
 
 const Orders = () => {
-  const [orders, setOrders] = useState(sample)
-  
-  // Load orders from localStorage
+  const [orders, setOrders] = useState([])
+
   useEffect(() => {
     try {
-      const savedOrders = JSON.parse(localStorage.getItem('tailorOrders') || '[]')
-      if (savedOrders.length > 0) {
-        setOrders(savedOrders)
-      }
+      const u = JSON.parse(localStorage.getItem('currentUser') || '{}')
+      if (!u.id) return
+
+      const q = query(collection(db, 'orders'), where('tailorId', '==', u.id))
+      const unsub = onSnapshot(q, (snapshot) => {
+        const liveOrders = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+        setOrders(liveOrders)
+      })
+      return () => unsub()
     } catch (error) {
-      console.error('Error loading orders:', error)
+      console.error('Error loading live orders:', error)
     }
   }, [])
   const [showPhotoModal, setShowPhotoModal] = useState(false)
@@ -62,7 +68,7 @@ const Orders = () => {
 
   const startCamera = async () => {
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' } // Use back camera if available
       })
       setStream(mediaStream)
@@ -120,9 +126,9 @@ const Orders = () => {
   const handlePhotoUpload = (e) => {
     const files = Array.from(e.target.files || [])
     if (files.length === 0) return
-    
+
     const imageFiles = files.filter(file => file.type.startsWith('image/'))
-    
+
     imageFiles.forEach(file => {
       const reader = new FileReader()
       reader.onloadend = () => {
@@ -135,7 +141,7 @@ const Orders = () => {
       }
       reader.readAsDataURL(file)
     })
-    
+
     // Reset input
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
@@ -146,58 +152,26 @@ const Orders = () => {
     setPhotos(prev => prev.filter(p => p.id !== photoId))
   }
 
-  const handleMarkReady = () => {
+  const handleMarkReady = async () => {
     if (photos.length === 0) {
       alert('Please upload at least one photo before marking as ready')
       return
     }
 
-    // Update order status
     if (selectedOrder) {
-      setOrders(os => os.map(o => 
-        o.id === selectedOrder.id 
-          ? { ...o, status: 'Ready', photos: photos.map(p => p.preview), needsRevision: false } 
-          : o
-      ))
-      
-      // Save to localStorage
       try {
-        const ordersData = JSON.parse(localStorage.getItem('tailorOrders') || '[]')
-        const orderIndex = ordersData.findIndex(o => o.id === selectedOrder.id)
-        if (orderIndex >= 0) {
-          ordersData[orderIndex] = {
-            ...ordersData[orderIndex],
-            status: 'Ready',
-            photos: photos.map(p => p.preview),
-            readyAt: new Date().toISOString(),
-            needsRevision: false
-          }
-        } else {
-          // Add new order if not found
-          ordersData.push({
-            ...selectedOrder,
-            status: 'Ready',
-            photos: photos.map(p => p.preview),
-            readyAt: new Date().toISOString(),
-            needsRevision: false
-          })
-        }
-        localStorage.setItem('tailorOrders', JSON.stringify(ordersData))
-        
-        // Also update customer orders
-        const customerOrders = JSON.parse(localStorage.getItem('customerOrders') || '[]')
-        const customerOrderIndex = customerOrders.findIndex(o => o.id === selectedOrder.id)
-        if (customerOrderIndex >= 0) {
-          customerOrders[customerOrderIndex].status = 'Ready'
-          customerOrders[customerOrderIndex].satisfactionStatus = null
-          customerOrders[customerOrderIndex].photos = photos.map(p => p.preview)
-          localStorage.setItem('customerOrders', JSON.stringify(customerOrders))
-        }
+        const orderRef = doc(db, 'orders', selectedOrder.id)
+        await updateDoc(orderRef, {
+          status: 'Ready',
+          photos: photos.map(p => p.preview),
+          readyAt: new Date().toISOString(),
+          needsRevision: false,
+          satisfactionStatus: null
+        })
       } catch (error) {
-        console.error('Error saving order:', error)
+        console.error('Error saving order to Firestore:', error)
       }
     }
-
     closePhotoModal()
   }
 
@@ -245,7 +219,7 @@ const Orders = () => {
                   Order {selectedOrder.id} • {selectedOrder.user}
                 </div>
               </div>
-              <button 
+              <button
                 onClick={closePhotoModal}
                 className="p-2 hover:bg-neutral-100 rounded-lg transition-colors"
               >

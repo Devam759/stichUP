@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useSearchParams, Link } from 'react-router-dom'
+import { collection, query, where, getDocs, doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { db } from '../firebase'
 
 const Enquiries = () => {
   const [params] = useSearchParams()
@@ -9,7 +11,7 @@ const Enquiries = () => {
   const tailorName = params.get('tailorName') || 'Tailor'
   const isOnline = params.get('isOnline') === 'true'
   const [allEnquiries, setAllEnquiries] = useState([])
-  
+
   const [messages, setMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
   const [isRecording, setIsRecording] = useState(false)
@@ -19,64 +21,43 @@ const Enquiries = () => {
   const audioChunksRef = useRef([])
   const recordingTimerRef = useRef(null)
 
-  // Load enquiries from localStorage when tailorId changes
-  useEffect(() => {
-    if (tailorId) {
-      try {
-        const enquiries = JSON.parse(localStorage.getItem('enquiries') || '[]')
-        const enquiry = enquiries.find(e => e.tailorId === tailorId)
-        if (enquiry && enquiry.messages && enquiry.messages.length > 0) {
-          // Load existing messages
-          setMessages(enquiry.messages)
-        } else {
-          // Initialize new conversation
-          if (isOnline) {
-            setMessages([
-              {
-                id: 1,
-                from: 'system',
-                text: `You started a conversation with ${tailorName}`,
-                createdAt: new Date()
-              },
-              {
-                id: 2,
-                from: 'tailor',
-                text: 'Hello! How can I help you with your tailoring needs?',
-                createdAt: new Date()
-              }
-            ])
-          } else {
-            setMessages([
-              {
-                id: 1,
-                from: 'system',
-                text: `${tailorName} is currently offline. Your enquiry will be sent and they will respond when available.`,
-                createdAt: new Date()
-              }
-            ])
-          }
-        }
-      } catch (error) {
-        console.error('Error loading enquiry:', error)
-        // Initialize if error occurs
-        if (isOnline) {
-          setMessages([
-            {
-              id: 1,
-              from: 'system',
-              text: `You started a conversation with ${tailorName}`,
-              createdAt: new Date()
-            },
-            {
-              id: 2,
-              from: 'tailor',
-              text: 'Hello! How can I help you with your tailoring needs?',
-              createdAt: new Date()
-            }
-          ])
-        }
-      }
+  const getCustomerId = () => {
+    try {
+      const u = JSON.parse(localStorage.getItem('currentUser') || '{}')
+      return u.id || u.phone
+    } catch {
+      return null
     }
+  }
+  const getCustomerName = () => {
+    try {
+      const u = JSON.parse(localStorage.getItem('currentUser') || '{}')
+      return u.fullName || u.name || 'Customer'
+    } catch {
+      return 'Customer'
+    }
+  }
+
+  // Load specific enquiry
+  useEffect(() => {
+    if (!tailorId) return
+    const customerId = getCustomerId()
+    if (!customerId) return
+
+    const docId = `${customerId}_${tailorId}`
+    const unsub = onSnapshot(doc(db, 'enquiries', docId), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data()
+        setMessages(data.messages || [])
+      } else {
+        // Initialize new conversation
+        setMessages([
+          { id: 1, from: 'system', text: `You started a conversation with ${tailorName}`, createdAt: new Date().toISOString() },
+          { id: 2, from: 'tailor', text: isOnline ? 'Hello! How can I help you with your tailoring needs?' : `${tailorName} is currently offline. Your enquiry will be sent and they will respond when available.`, createdAt: new Date().toISOString() }
+        ])
+      }
+    })
+    return () => unsub()
   }, [tailorId, tailorName, isOnline])
 
   useEffect(() => {
@@ -85,31 +66,34 @@ const Enquiries = () => {
     }
   }, [messages])
 
-  const sendMessage = () => {
+  const sendToFirestore = async (msgsArray) => {
+    const customerId = getCustomerId()
+    if (!customerId) return
+    const docId = `${customerId}_${tailorId}`
+    await setDoc(doc(db, 'enquiries', docId), {
+      customerId,
+      customerName: getCustomerName(),
+      tailorId,
+      tailorName,
+      messages: msgsArray,
+      lastUpdated: new Date().toISOString(),
+      isOnline
+    }, { merge: true })
+  }
+
+  const sendMessage = async () => {
     if (!chatInput.trim()) return
-    
+
     const newMessage = {
-      id: messages.length + 1,
+      id: Date.now(),
       from: 'user',
       text: chatInput.trim(),
-      createdAt: new Date()
+      createdAt: new Date().toISOString()
     }
-    
-    setMessages(prev => [...prev, newMessage])
+
+    const newMsgs = [...messages, newMessage]
     setChatInput('')
-    
-    // Mock tailor reply (in real app, this would come from socket/API)
-    if (isOnline) {
-      setTimeout(() => {
-        const tailorReply = {
-          id: messages.length + 2,
-          from: 'tailor',
-          text: 'Thank you for your enquiry! I can provide a custom quote for that. Let me check the details.',
-          createdAt: new Date()
-        }
-        setMessages(prev => [...prev, tailorReply])
-      }, 1500)
-    }
+    await sendToFirestore(newMsgs)
   }
 
   const startRecording = async () => {
@@ -127,46 +111,25 @@ const Enquiries = () => {
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        const audioUrl = URL.createObjectURL(audioBlob)
-        
-        // Convert blob to base64 for storage
         const reader = new FileReader()
-        reader.onloadend = () => {
+        reader.onloadend = async () => {
           const base64Audio = reader.result
-          
+
           const voiceMessage = {
-            id: messages.length + 1,
+            id: Date.now(),
             from: 'user',
             type: 'voice',
             audioUrl: base64Audio,
             duration: recordingTime,
-            createdAt: new Date()
+            createdAt: new Date().toISOString()
           }
-          
-          setMessages(prev => [...prev, voiceMessage])
-          
-          // Stop all tracks
+
           stream.getTracks().forEach(track => track.stop())
-          
-          // Reset recording state
           setIsRecording(false)
           setRecordingTime(0)
-          if (recordingTimerRef.current) {
-            clearInterval(recordingTimerRef.current)
-          }
-          
-          // Mock tailor reply
-          if (isOnline) {
-            setTimeout(() => {
-              const tailorReply = {
-                id: messages.length + 2,
-                from: 'tailor',
-                text: 'Thanks for the voice message! I understand your requirements.',
-                createdAt: new Date()
-              }
-              setMessages(prev => [...prev, tailorReply])
-            }, 1500)
-          }
+          if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+
+          await sendToFirestore([...messages, voiceMessage])
         }
         reader.readAsDataURL(audioBlob)
       }
@@ -174,7 +137,7 @@ const Enquiries = () => {
       mediaRecorder.start()
       setIsRecording(true)
       setRecordingTime(0)
-      
+
       // Start timer
       recordingTimerRef.current = setInterval(() => {
         setRecordingTime(prev => prev + 1)
@@ -199,55 +162,33 @@ const Enquiries = () => {
 
   // Load all enquiries for list view
   useEffect(() => {
-    try {
-      const enquiries = JSON.parse(localStorage.getItem('enquiries') || '[]')
-      setAllEnquiries(enquiries.sort((a, b) => new Date(b.lastUpdated) - new Date(a.lastUpdated)))
-    } catch (error) {
-      console.error('Error loading enquiries:', error)
+    if (tailorId) return // only fetch if on the master layout
+    const customerId = getCustomerId()
+    if (!customerId) return
+
+    const fetchAll = async () => {
+      try {
+        const q = query(collection(db, 'enquiries'), where('customerId', '==', customerId))
+        const unsub = onSnapshot(q, (snapshot) => {
+          let list = snapshot.docs.map(doc => doc.data())
+          list.sort((a, b) => new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0))
+          setAllEnquiries(list)
+        })
+        return () => unsub()
+      } catch (error) {
+        console.error('Error loading enquiries:', error)
+      }
     }
-  }, [])
+    fetchAll()
+  }, [tailorId])
 
   // Cleanup recording on unmount
   useEffect(() => {
     return () => {
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current)
-      }
-      if (mediaRecorderRef.current && isRecording) {
-        mediaRecorderRef.current.stop()
-      }
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+      if (mediaRecorderRef.current && isRecording) mediaRecorderRef.current.stop()
     }
   }, [isRecording])
-
-  // Save messages to localStorage
-  useEffect(() => {
-    if (tailorId && messages.length > 0) {
-      try {
-        const enquiries = JSON.parse(localStorage.getItem('enquiries') || '[]')
-        const existingIndex = enquiries.findIndex(e => e.tailorId === tailorId)
-        
-        const enquiryData = {
-          tailorId,
-          tailorName,
-          messages,
-          lastUpdated: new Date().toISOString(),
-          isOnline
-        }
-        
-        if (existingIndex >= 0) {
-          enquiries[existingIndex] = enquiryData
-        } else {
-          enquiries.push(enquiryData)
-        }
-        
-        localStorage.setItem('enquiries', JSON.stringify(enquiries))
-        // Update all enquiries list
-        setAllEnquiries(enquiries.sort((a, b) => new Date(b.lastUpdated) - new Date(a.lastUpdated)))
-      } catch (error) {
-        console.error('Error saving enquiry:', error)
-      }
-    }
-  }, [messages, tailorId, tailorName, isOnline])
 
   // If no tailorId, show list of all enquiries
   if (!tailorId) {
@@ -271,13 +212,13 @@ const Enquiries = () => {
             ) : (
               <div className="grid gap-4">
                 {allEnquiries.map((enquiry) => {
-                  const lastMessage = enquiry.messages && enquiry.messages.length > 0 
-                    ? enquiry.messages[enquiry.messages.length - 1] 
+                  const lastMessage = enquiry.messages && enquiry.messages.length > 0
+                    ? enquiry.messages[enquiry.messages.length - 1]
                     : null
-                  const preview = lastMessage 
+                  const preview = lastMessage
                     ? (lastMessage.type === 'voice' ? '🎤 Voice message' : (lastMessage.text || 'Voice message').substring(0, 100))
                     : 'No messages yet'
-                  
+
                   return (
                     <Link
                       key={enquiry.tailorId}
@@ -288,9 +229,8 @@ const Enquiries = () => {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-2">
                             <h3 className="font-semibold text-lg">{enquiry.tailorName}</h3>
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                              enquiry.isOnline ? 'bg-green-100 text-green-800' : 'bg-neutral-100 text-neutral-600'
-                            }`}>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${enquiry.isOnline ? 'bg-green-100 text-green-800' : 'bg-neutral-100 text-neutral-600'
+                              }`}>
                               {enquiry.isOnline ? 'Online' : 'Offline'}
                             </span>
                           </div>
@@ -347,7 +287,7 @@ const Enquiries = () => {
           </div>
 
           <div className="card p-6">
-            <div 
+            <div
               ref={chatRef}
               className="h-96 overflow-y-auto mb-4 bg-neutral-50 border border-neutral-200 rounded-lg p-4 space-y-3"
             >
@@ -357,17 +297,16 @@ const Enquiries = () => {
                 </div>
               ) : (
                 messages.map((msg) => (
-                  <div 
-                    key={msg.id} 
+                  <div
+                    key={msg.id}
                     className={`flex ${msg.from === 'user' ? 'justify-end' : msg.from === 'system' ? 'justify-center' : 'justify-start'}`}
                   >
-                    <div className={`max-w-[80%] px-3 py-2 rounded-lg text-sm ${
-                      msg.from === 'user' 
-                        ? 'bg-[color:var(--color-primary)] text-white' 
+                    <div className={`max-w-[80%] px-3 py-2 rounded-lg text-sm ${msg.from === 'user'
+                        ? 'bg-[color:var(--color-primary)] text-white'
                         : msg.from === 'system'
-                        ? 'text-neutral-500 text-xs bg-transparent'
-                        : 'bg-white border border-neutral-200'
-                    }`}>
+                          ? 'text-neutral-500 text-xs bg-transparent'
+                          : 'bg-white border border-neutral-200'
+                      }`}>
                       {msg.type === 'voice' ? (
                         <div className="flex items-center gap-2">
                           <audio controls src={msg.audioUrl} className="max-w-full">
@@ -383,7 +322,7 @@ const Enquiries = () => {
                 ))
               )}
             </div>
-            
+
             <div className="flex gap-2 items-center">
               <input
                 value={chatInput}
@@ -399,7 +338,7 @@ const Enquiries = () => {
                     <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></div>
                     <span className="text-sm font-medium">{formatTime(recordingTime)}</span>
                   </div>
-                  <button 
+                  <button
                     onClick={stopRecording}
                     className="btn-primary"
                   >
@@ -418,8 +357,8 @@ const Enquiries = () => {
                       <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
                     </svg>
                   </button>
-                  <button 
-                    onClick={sendMessage} 
+                  <button
+                    onClick={sendMessage}
                     className="btn-primary"
                     disabled={!isOnline || !chatInput.trim()}
                   >
@@ -428,7 +367,7 @@ const Enquiries = () => {
                 </>
               )}
             </div>
-            
+
             <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
               <strong>Note:</strong> The tailor can provide custom pricing based on your requirements. Discuss your needs in the chat!
             </div>

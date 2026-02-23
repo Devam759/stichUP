@@ -4,13 +4,15 @@ import Card from '../../components/ui/Card'
 import PrimaryButton from '../../components/ui/PrimaryButton'
 import Input from '../../components/ui/Input'
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
+import { collection, query, where, getDocs, doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { db } from '../../firebase'
 
 const TailorEnquiries = () => {
   const [params] = useSearchParams()
   const customerId = params.get('customerId')
   const customerName = params.get('customerName') || 'Customer'
   const [allEnquiries, setAllEnquiries] = useState([])
-  
+
   const [messages, setMessages] = useState([])
   const [chatInput, setChatInput] = useState('')
   const [customPricing, setCustomPricing] = useState({ service: '', price: '' })
@@ -35,91 +37,75 @@ const TailorEnquiries = () => {
 
   // Load enquiries for this tailor
   useEffect(() => {
-    try {
-      const enquiries = JSON.parse(localStorage.getItem('tailorEnquiries') || '[]')
-      const tailorId = currentTailor?.phone || currentTailor?.id
-      if (tailorId) {
-        // Filter enquiries for this specific tailor
-        const tailorEnquiries = enquiries.filter(e => 
-          (e.tailorId || '').replace(/\D/g, '') === (tailorId || '').replace(/\D/g, '')
-        )
-        setAllEnquiries(tailorEnquiries.sort((a, b) => new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0)))
-      }
-    } catch (error) {
-      console.error('Error loading tailor enquiries:', error)
-    }
-  }, [currentTailor])
+    if (customerId) return // Detail view handles its own listener
+
+    const tailorId = currentTailor?.phone || currentTailor?.id
+    if (!tailorId) return
+
+    const unsub = onSnapshot(query(collection(db, 'enquiries'), where('tailorId', '==', tailorId)), (snapshot) => {
+      let list = snapshot.docs.map(doc => doc.data())
+      list.sort((a, b) => new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0))
+      setAllEnquiries(list)
+    }, (error) => {
+      console.error('Error loading tailor enquiries via Firestore:', error)
+    })
+    return () => unsub()
+  }, [currentTailor, customerId])
 
   // Load messages for specific customer conversation
   useEffect(() => {
-    if (customerId && currentTailor) {
-      try {
-        const enquiries = JSON.parse(localStorage.getItem('tailorEnquiries') || '[]')
-        const tailorId = currentTailor?.phone || currentTailor?.id
-        const enquiry = enquiries.find(e => 
-          e.customerId === customerId && 
-          (e.tailorId || '').replace(/\D/g, '') === (tailorId || '').replace(/\D/g, '')
-        )
-        if (enquiry && enquiry.messages && enquiry.messages.length > 0) {
-          setMessages(enquiry.messages)
-        } else {
-          setMessages([])
-        }
-      } catch (error) {
-        console.error('Error loading messages:', error)
+    if (!customerId || !currentTailor) return
+    const tailorId = currentTailor.phone || currentTailor.id
+    const docId = `${customerId}_${tailorId}`
+
+    const unsub = onSnapshot(doc(db, 'enquiries', docId), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data()
+        setMessages(data.messages || [])
+      } else {
+        setMessages([])
       }
-    }
+    }, (error) => {
+      console.error('Error loading enquiries via Firestore:', error)
+    })
+    return () => unsub()
   }, [customerId, currentTailor])
 
   useEffect(() => {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight
-    }
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight
   }, [messages])
 
-  const sendMessage = () => {
-    if (!chatInput.trim() || !customerId || !currentTailor) return
-    
+  const sendToFirestore = async (newMessagesArray, statusUpdate = null) => {
     const tailorId = currentTailor?.phone || currentTailor?.id
+    const tailorName = currentTailor?.name || currentTailor?.fullName || 'Tailor'
+    const docId = `${customerId}_${tailorId}`
+
+    const payload = {
+      customerId,
+      customerName,
+      tailorId,
+      tailorName,
+      messages: newMessagesArray,
+      lastUpdated: new Date().toISOString()
+    }
+    if (statusUpdate) payload.status = statusUpdate
+
+    await setDoc(doc(db, 'enquiries', docId), payload, { merge: true })
+  }
+
+  const sendMessage = async () => {
+    if (!chatInput.trim() || !customerId || !currentTailor) return
+
     const newMessage = {
-      id: messages.length + 1,
+      id: Date.now(),
       from: 'tailor',
       text: chatInput.trim(),
-      createdAt: new Date()
+      createdAt: new Date().toISOString()
     }
-    
+
     const updatedMessages = [...messages, newMessage]
-    setMessages(updatedMessages)
     setChatInput('')
-    
-    // Save to localStorage
-    try {
-      const enquiries = JSON.parse(localStorage.getItem('tailorEnquiries') || '[]')
-      const existingIndex = enquiries.findIndex(e => 
-        e.customerId === customerId && 
-        (e.tailorId || '').replace(/\D/g, '') === (tailorId || '').replace(/\D/g, '')
-      )
-      
-      const enquiryData = {
-        customerId,
-        customerName,
-        tailorId,
-        tailorName: currentTailor.name || currentTailor.fullName || 'Tailor',
-        messages: updatedMessages,
-        lastUpdated: new Date().toISOString()
-      }
-      
-      if (existingIndex >= 0) {
-        enquiries[existingIndex] = enquiryData
-      } else {
-        enquiries.push(enquiryData)
-      }
-      
-      localStorage.setItem('tailorEnquiries', JSON.stringify(enquiries))
-      setAllEnquiries(enquiries.sort((a, b) => new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0)))
-    } catch (error) {
-      console.error('Error saving enquiry:', error)
-    }
+    await sendToFirestore(updatedMessages)
   }
 
   // If no customerId, show list of all enquiries for this tailor
@@ -140,13 +126,13 @@ const TailorEnquiries = () => {
           ) : (
             <div className="grid gap-4">
               {allEnquiries.map((enquiry) => {
-                const lastMessage = enquiry.messages && enquiry.messages.length > 0 
-                  ? enquiry.messages[enquiry.messages.length - 1] 
+                const lastMessage = enquiry.messages && enquiry.messages.length > 0
+                  ? enquiry.messages[enquiry.messages.length - 1]
                   : null
-                const preview = lastMessage 
+                const preview = lastMessage
                   ? (lastMessage.type === 'voice' ? '🎤 Voice message' : (lastMessage.text || '').substring(0, 100))
                   : 'No messages yet'
-                
+
                 return (
                   <Link
                     key={enquiry.customerId}
@@ -183,80 +169,44 @@ const TailorEnquiries = () => {
     )
   }
 
-  const handleAddCustomPricing = () => {
+  const handleAddCustomPricing = async () => {
     if (!customPricing.service || !customPricing.price) return
-    
+
     const pricingMessage = {
-      id: messages.length + 1,
+      id: Date.now(),
       from: 'tailor',
       type: 'pricing',
       text: `Custom pricing: ${customPricing.service} - ₹${customPricing.price}`,
       pricing: { service: customPricing.service, price: customPricing.price },
-      createdAt: new Date()
+      createdAt: new Date().toISOString()
     }
-    
+
     const updatedMessages = [...messages, pricingMessage]
-    setMessages(updatedMessages)
     setCustomPricing({ service: '', price: '' })
-    
-    // Save to localStorage
+
     if (customerId && currentTailor) {
-      try {
-        const enquiries = JSON.parse(localStorage.getItem('tailorEnquiries') || '[]')
-        const tailorId = currentTailor?.phone || currentTailor?.id
-        const existingIndex = enquiries.findIndex(e => 
-          e.customerId === customerId && 
-          (e.tailorId || '').replace(/\D/g, '') === (tailorId || '').replace(/\D/g, '')
-        )
-        
-        if (existingIndex >= 0) {
-          enquiries[existingIndex].messages = updatedMessages
-          enquiries[existingIndex].lastUpdated = new Date().toISOString()
-          localStorage.setItem('tailorEnquiries', JSON.stringify(enquiries))
-        }
-      } catch (error) {
-        console.error('Error saving pricing:', error)
-      }
+      await sendToFirestore(updatedMessages)
     }
   }
 
-  const handleReject = () => {
+  const handleReject = async () => {
     if (!rejectReason.trim()) return
-    
-    // Add rejection message
+
     const rejectMessage = {
-      id: messages.length + 1,
+      id: Date.now(),
       from: 'tailor',
       type: 'rejection',
       text: `Order rejected: ${rejectReason}`,
       reason: rejectReason,
-      createdAt: new Date()
+      createdAt: new Date().toISOString()
     }
-    
+
     const updatedMessages = [...messages, rejectMessage]
-    setMessages(updatedMessages)
     setShowRejectModal(false)
     setRejectReason('')
-    
-    // Save to localStorage
+
     if (customerId && currentTailor) {
-      try {
-        const enquiries = JSON.parse(localStorage.getItem('tailorEnquiries') || '[]')
-        const tailorId = currentTailor?.phone || currentTailor?.id
-        const existingIndex = enquiries.findIndex(e => 
-          e.customerId === customerId && 
-          (e.tailorId || '').replace(/\D/g, '') === (tailorId || '').replace(/\D/g, '')
-        )
-        
-        if (existingIndex >= 0) {
-          enquiries[existingIndex].messages = updatedMessages
-          enquiries[existingIndex].status = 'rejected'
-          enquiries[existingIndex].lastUpdated = new Date().toISOString()
-          localStorage.setItem('tailorEnquiries', JSON.stringify(enquiries))
-        }
-      } catch (error) {
-        console.error('Error saving rejection:', error)
-      }
+      await sendToFirestore(updatedMessages, 'rejected')
     }
   }
 
@@ -265,7 +215,7 @@ const TailorEnquiries = () => {
     <TailorLayout>
       <div className="max-w-4xl">
         <div className="mb-4">
-          <Link 
+          <Link
             to="/tailor/enquiries"
             className="text-sm text-[color:var(--color-primary)] hover:underline mb-2 inline-block"
           >
@@ -296,7 +246,7 @@ const TailorEnquiries = () => {
               />
             </div>
           </div>
-          <PrimaryButton 
+          <PrimaryButton
             onClick={handleAddCustomPricing}
             className="mt-3"
             disabled={!customPricing.service || !customPricing.price}
@@ -306,8 +256,8 @@ const TailorEnquiries = () => {
         </Card>
 
         <Card className="p-4">
-          <div 
-            ref={chatRef} 
+          <div
+            ref={chatRef}
             className="h-96 overflow-y-auto rounded-lg border border-neutral-200 p-4 bg-neutral-50 mb-4"
           >
             {messages.length === 0 ? (
@@ -316,13 +266,12 @@ const TailorEnquiries = () => {
               </div>
             ) : (
               messages.map((m) => (
-                <div 
-                  key={m.id} 
-                  className={`max-w-[80%] mb-2 px-3 py-2 rounded-lg text-sm ${
-                    m.from === 'tailor' 
-                      ? 'ml-auto bg-[color:var(--color-primary)] text-white' 
+                <div
+                  key={m.id}
+                  className={`max-w-[80%] mb-2 px-3 py-2 rounded-lg text-sm ${m.from === 'tailor'
+                      ? 'ml-auto bg-[color:var(--color-primary)] text-white'
                       : 'bg-white border border-neutral-200'
-                  } ${m.type === 'rejection' ? 'bg-red-100 border-red-300 text-red-800' : ''}`}
+                    } ${m.type === 'rejection' ? 'bg-red-100 border-red-300 text-red-800' : ''}`}
                 >
                   {m.type === 'pricing' && m.pricing ? (
                     <div>
@@ -333,9 +282,8 @@ const TailorEnquiries = () => {
                     m.text
                   )}
                   {m.createdAt && (
-                    <div className={`text-xs mt-1 ${
-                      m.from === 'tailor' ? (m.type === 'rejection' ? 'text-red-600' : 'text-white/70') : 'text-neutral-500'
-                    }`}>
+                    <div className={`text-xs mt-1 ${m.from === 'tailor' ? (m.type === 'rejection' ? 'text-red-600' : 'text-white/70') : 'text-neutral-500'
+                      }`}>
                       {new Date(m.createdAt).toLocaleTimeString()}
                     </div>
                   )}
@@ -344,21 +292,21 @@ const TailorEnquiries = () => {
             )}
           </div>
           <div className="flex items-center gap-2 mb-3">
-            <input 
-              value={chatInput} 
+            <input
+              value={chatInput}
               onChange={e => setChatInput(e.target.value)}
               onKeyPress={e => e.key === 'Enter' && sendMessage()}
-              placeholder="Type your message..." 
-              className="flex-1 rounded-xl border border-neutral-200 px-3 py-2 outline-none focus:border-[color:var(--color-primary)]" 
+              placeholder="Type your message..."
+              className="flex-1 rounded-xl border border-neutral-200 px-3 py-2 outline-none focus:border-[color:var(--color-primary)]"
             />
-            <button 
+            <button
               onClick={sendMessage}
               className="btn-primary"
             >
               Send
             </button>
           </div>
-          <button 
+          <button
             onClick={() => setShowRejectModal(true)}
             className="w-full btn-outline text-red-600 border-red-200 hover:bg-red-50"
           >
@@ -382,13 +330,13 @@ const TailorEnquiries = () => {
               />
             </div>
             <div className="flex gap-2">
-              <button 
+              <button
                 onClick={() => setShowRejectModal(false)}
                 className="btn-outline flex-1"
               >
                 Cancel
               </button>
-              <PrimaryButton 
+              <PrimaryButton
                 onClick={handleReject}
                 className="flex-1 bg-red-600 hover:bg-red-700"
                 disabled={!rejectReason.trim()}

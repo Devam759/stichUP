@@ -5,15 +5,9 @@ import TailorListCard from '../components/TailorListCard'
 import { FiSearch } from 'react-icons/fi'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import { collection, query, where, getDocs } from 'firebase/firestore'
+import { db } from '../firebase'
 
-const sampleTailors = [
-  { id: 'T-1001', name: 'StitchUp Tailors', shopPhotoUrl: '', isAvailable: true, currentOrders: 3, distanceKm: 2.5, rating: 4.7, reviews: 128, priceFrom: 149 },
-  { id: 'T-1002', name: 'Needle & Thread', shopPhotoUrl: '', isAvailable: true, currentOrders: 1, distanceKm: 3.8, rating: 4.5, reviews: 95, priceFrom: 129 },
-  { id: 'T-1003', name: 'Perfect Stitch', shopPhotoUrl: '', isAvailable: false, currentOrders: 5, distanceKm: 1.2, rating: 4.9, reviews: 210, priceFrom: 199 },
-  { id: 'T-1004', name: 'Master Tailors', shopPhotoUrl: '', isAvailable: true, currentOrders: 2, distanceKm: 4.5, rating: 4.6, reviews: 156, priceFrom: 179 },
-  { id: 'T-1005', name: 'Quick Fix Tailors', shopPhotoUrl: '', isAvailable: true, currentOrders: 0, distanceKm: 0.8, rating: 4.8, reviews: 89, priceFrom: 99 },
-  { id: 'T-1006', name: 'Elite Stitching', shopPhotoUrl: '', isAvailable: true, currentOrders: 4, distanceKm: 5.2, rating: 4.4, reviews: 112, priceFrom: 219 },
-]
 
 const FindTailor = () => {
   const [query, setQuery] = useState('')
@@ -31,47 +25,60 @@ const FindTailor = () => {
   const navigate = useNavigate()
   const [params] = useSearchParams()
 
+  const [allTailors, setAllTailors] = useState([])
+
+  useEffect(() => {
+    const fetchTailors = async () => {
+      try {
+        const q = query(collection(db, 'users'), where('role', '==', 'tailor'))
+        const qs = await getDocs(q)
+        const docs = qs.docs.map(d => {
+          const data = d.data()
+          return {
+            id: d.id,
+            name: data.fullName || data.name || 'Tailor',
+            shopPhotoUrl: data.shopPhotoUrl || '',
+            isAvailable: typeof data.isAvailable === 'boolean' ? data.isAvailable : true,
+            currentOrders: data.currentOrders || 0,
+            distanceKm: data.distanceKm || 0,
+            rating: data.rating || 4.5,
+            reviews: data.reviews || 0,
+            priceFrom: data.priceFrom || 150
+          }
+        })
+        setAllTailors(docs)
+      } catch (e) {
+        console.error("Failed to load tailors via Firestore", e)
+        setAllTailors([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchTailors()
+  }, [])
+
   const list = useMemo(() => {
-    let filtered = sampleTailors.filter(t => {
-      // Search filter
+    let filtered = allTailors.filter(t => {
       if (query && !t.name.toLowerCase().includes(query.toLowerCase())) return false
-      
-      // Availability filter
       if (filters.availability === 'available' && !t.isAvailable) return false
       if (filters.availability === 'busy' && t.isAvailable) return false
-      
-      // Rating filter
       if (t.rating < filters.minRating) return false
-      
-      // Distance filter
       if (t.distanceKm > filters.maxDistance) return false
-      
-      // Price filter
       if (t.priceFrom < filters.minPrice || t.priceFrom > filters.maxPrice) return false
-      
       return true
     })
-    
-    // Sort
+
     filtered.sort((a, b) => {
       if (filters.sortBy === 'rating') return b.rating - a.rating
       if (filters.sortBy === 'price') return a.priceFrom - b.priceFrom
       if (filters.sortBy === 'distance') return a.distanceKm - b.distanceKm
       return 0
     })
-    
+
     return filtered
-  }, [query, filters])
+  }, [allTailors, query, filters])
 
-  // Mock initial loading state
-  useEffect(() => {
-    // Simulate loading
-    const timer = setTimeout(() => {
-      setLoading(false)
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [])
-
+  // (Timer removed because Firestore natively sets loading status)
   return (
     <div className="min-h-dvh flex flex-col">
       <Navbar />
@@ -95,7 +102,7 @@ const FindTailor = () => {
             <aside className="hidden md:block w-64 shrink-0">
               <div className="bg-white rounded-xl border border-neutral-200 p-4 shadow-soft sticky top-4">
                 <h3 className="text-lg font-semibold mb-4">Filters</h3>
-                
+
                 <div className="space-y-6">
                   {/* Availability Filter */}
                   <div>
@@ -110,7 +117,7 @@ const FindTailor = () => {
                       <option value="busy">Busy</option>
                     </select>
                   </div>
-                  
+
                   {/* Rating Filter */}
                   <div>
                     <label className="text-sm font-medium text-neutral-700 mb-2 block">
@@ -126,7 +133,7 @@ const FindTailor = () => {
                       className="w-full"
                     />
                   </div>
-                  
+
                   {/* Distance Filter */}
                   <div>
                     <label className="text-sm font-medium text-neutral-700 mb-2 block">
@@ -142,7 +149,7 @@ const FindTailor = () => {
                       className="w-full"
                     />
                   </div>
-                  
+
                   {/* Price Range */}
                   <div>
                     <label className="text-sm font-medium text-neutral-700 mb-2 block">
@@ -158,7 +165,7 @@ const FindTailor = () => {
                       className="w-full"
                     />
                   </div>
-                  
+
                   <div>
                     <label className="text-sm font-medium text-neutral-700 mb-2 block">
                       Max Price: ₹{filters.maxPrice}
@@ -173,7 +180,7 @@ const FindTailor = () => {
                       className="w-full"
                     />
                   </div>
-                  
+
                   {/* Sort By */}
                   <div>
                     <label className="text-sm font-medium text-neutral-700 mb-2 block">Sort By</label>
@@ -187,7 +194,7 @@ const FindTailor = () => {
                       <option value="price">Price (Lowest)</option>
                     </select>
                   </div>
-                  
+
                   <button
                     onClick={() => setFilters({
                       availability: 'all',
@@ -208,40 +215,40 @@ const FindTailor = () => {
             {/* Tailors List - Right Side */}
             <div className="flex-1">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-6 pb-4">
-          {loading ? (
-            Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="card p-4 animate-pulse">
-                <div className="flex gap-3">
-                  <div className="w-20 h-20 rounded-xl bg-neutral-200" />
-                  <div className="flex-1 grid gap-2">
-                    <div className="h-4 w-40 bg-neutral-200 rounded" />
-                    <div className="h-3 w-56 bg-neutral-200 rounded" />
-                    <div className="h-6 w-56 bg-neutral-200 rounded" />
+                {loading ? (
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="card p-4 animate-pulse">
+                      <div className="flex gap-3">
+                        <div className="w-20 h-20 rounded-xl bg-neutral-200" />
+                        <div className="flex-1 grid gap-2">
+                          <div className="h-4 w-40 bg-neutral-200 rounded" />
+                          <div className="h-3 w-56 bg-neutral-200 rounded" />
+                          <div className="h-6 w-56 bg-neutral-200 rounded" />
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : list.length ? (
+                  list.map((t) => {
+                    // Determine if this is quick fix based on URL params or localStorage
+                    const workType = params.get('type') === 'heavy' ? 'heavy' : (localStorage.getItem('workType') === 'heavy' ? 'heavy' : 'light')
+                    const isQuickFix = workType !== 'heavy'
+
+                    return (
+                      <TailorListCard
+                        key={t.id}
+                        tailor={t}
+                        onHover={setHovered}
+                        onLeave={() => setHovered(null)}
+                        isQuickFix={isQuickFix}
+                      />
+                    )
+                  })
+                ) : (
+                  <div className="card p-6 text-center text-neutral-600">
+                    No tailors match. Adjust filters or pick another work type.
                   </div>
-                </div>
-              </div>
-            ))
-          ) : list.length ? (
-            list.map((t) => {
-              // Determine if this is quick fix based on URL params or localStorage
-              const workType = params.get('type') === 'heavy' ? 'heavy' : (localStorage.getItem('workType') === 'heavy' ? 'heavy' : 'light')
-              const isQuickFix = workType !== 'heavy'
-              
-              return (
-                <TailorListCard
-                  key={t.id}
-                  tailor={t}
-                  onHover={setHovered}
-                  onLeave={() => setHovered(null)}
-                  isQuickFix={isQuickFix}
-                />
-              )
-            })
-          ) : (
-              <div className="card p-6 text-center text-neutral-600">
-                No tailors match. Adjust filters or pick another work type.
-              </div>
-            )}
+                )}
               </div>
             </div>
           </div>

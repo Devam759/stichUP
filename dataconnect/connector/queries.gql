@@ -1,0 +1,30 @@
+query GetUserByPhone($phone: String!) @auth(level: PUBLIC) {
+  user(phoneNumber: $phone) {
+    phoneNumber
+    role
+    displayName
+    email
+  }
+}
+
+query ListTailors @auth(level: PUBLIC) {
+  users(where: {role: {eq: "tailor"}}) {
+    phoneNumber
+    displayName
+    address
+    profileBio
+  }
+}
+
+query GetOrdersByCustomer($customerPhone: String!) @auth(level: PUBLIC) {
+  orders(where: { customer: { phoneNumber: { eq: $customerPhone } } }) {
+    id
+    status
+    totalPrice
+    orderDate
+    tailor {
+      displayName
+      phoneNumber
+    }
+  }
+}

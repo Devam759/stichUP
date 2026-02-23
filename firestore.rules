@@ -1,0 +1,14 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allows anyone to read and write to the chat module
+    match /chats/{jobId}/messages/{messageId} {
+      allow read, write: if true;
+    }
+    // General access rule for prototyping. NOT securely locked for production.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

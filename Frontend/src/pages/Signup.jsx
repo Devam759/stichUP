@@ -6,8 +6,9 @@ import PrimaryButton from '../components/ui/PrimaryButton'
 import OTPModal from '../components/OTPModal'
 import Toast from '../components/Toast'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
- 
-
+import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth'
+import { doc, getDoc, setDoc } from 'firebase/firestore'
+import { auth, db } from '../firebase'
 const validateEmail = (v) => /.+@.+\..+/.test(v)
 
 const Signup = () => {
@@ -27,10 +28,12 @@ const Signup = () => {
   const [otpOpen, setOtpOpen] = useState(false)
   const [otpVerified, setOtpVerified] = useState(false)
   const [toast, setToast] = useState(false)
+  const [confirmationResult, setConfirmationResult] = useState(null)
+  const [otpLoading, setOtpLoading] = useState(false)
 
   const onChange = (e) => setForm({ ...form, [e.target.name]: e.target.value })
 
-  const onSubmit = (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault()
     const next = {}
     if (form.email && !validateEmail(form.email)) next.email = 'Enter a valid email'
@@ -39,25 +42,80 @@ const Signup = () => {
     if (!form.password || form.password.length < 6) next.password = 'Min 6 characters'
     if (!otpVerified) next.otp = 'Please verify your phone with OTP'
     setErrors(next)
+
     if (Object.keys(next).length === 0) {
-      // Save user to localStorage (demo). In real app call backend API.
-      const users = JSON.parse(localStorage.getItem('users') || '[]')
-      const existing = users.find(u => u.phone === form.phone || (form.email && u.email === form.email))
-      if (existing) {
-        setErrors({ form: 'User already exists with this phone/email' })
-        return
+      try {
+        const uid = auth.currentUser ? auth.currentUser.uid : form.phone.replace(/\D/g, '')
+        const userRef = doc(db, 'users', uid)
+        const userSnap = await getDoc(userRef)
+
+        if (userSnap.exists()) {
+          setErrors({ form: 'User already exists with this phone/email' })
+          return
+        }
+
+        const user = { fullName: form.fullName, email: form.email, phone: form.phone, password: form.password, role: form.role, id: uid }
+        await setDoc(userRef, user)
+
+        localStorage.setItem('currentUser', JSON.stringify(user))
+        window.dispatchEvent(new Event('authChange'))
+        setToast(true)
+        setTimeout(() => setToast(false), 1200)
+
+        if (user.role === 'tailor') navigate('/tailor/dashboard')
+        else navigate('/customer')
+      } catch (err) {
+        console.error("Signup error:", err)
+        setErrors({ form: 'Failed to create user in Firebase' })
       }
-      const user = { fullName: form.fullName, email: form.email, phone: form.phone, password: form.password, role: form.role }
-      users.push(user)
-      localStorage.setItem('users', JSON.stringify(users))
-      localStorage.setItem('currentUser', JSON.stringify(user))
-      // Dispatch event to update navbar
-      window.dispatchEvent(new Event('authChange'))
-      setToast(true)
-      setTimeout(() => setToast(false), 1200)
-      // navigate to respective dashboard
-      if (user.role === 'tailor') navigate('/tailor/dashboard')
-      else navigate('/customer')
+    }
+  }
+
+  const handleGetOtp = async () => {
+    const next = {}
+    if (!form.phone || form.phone.replace(/\D/g, '').length < 10) next.phone = 'Enter a valid phone number'
+    if (Object.keys(next).length > 0) {
+      setErrors(next)
+      return
+    }
+
+    setOtpLoading(true)
+    try {
+      const formattedPhone = '+91' + form.phone.replace(/\D/g, '')
+
+      if (!window.recaptchaVerifier) {
+        window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          size: 'invisible'
+        })
+      }
+
+      const confirmation = await signInWithPhoneNumber(auth, formattedPhone, window.recaptchaVerifier)
+      setConfirmationResult(confirmation)
+      setOtpOpen(true)
+    } catch (error) {
+      console.error("OTP API issue:", error)
+      setErrors({ phone: `Failed to send OTP: ${error.message}` })
+    }
+    setOtpLoading(false)
+  }
+
+  const handleVerifyOtp = async (otpString) => {
+    if (!otpString || otpString.length !== 6) return
+
+    try {
+      if (confirmationResult) {
+        await confirmationResult.confirm(otpString)
+        setOtpVerified(true)
+        setOtpOpen(false)
+      } else {
+        // Fallback or error
+        setErrors({ phone: 'No active verification session. Please try again.' })
+        setOtpOpen(false)
+      }
+    } catch (error) {
+      console.error("Verification error:", error)
+      setErrors({ phone: `Invalid OTP: ${error.message}` })
+      setOtpOpen(false)
     }
   }
 
@@ -108,24 +166,23 @@ const Signup = () => {
               onChange={(e) => { setForm({ ...form, phone: e.target.value }); if (otpVerified) setOtpVerified(false); }}
               placeholder="98765 43210"
               error={errors.phone}
-              helperText="Demo: 7340015201"
               right={
                 <button
                   type="button"
-                  disabled={!form.phone || form.phone.replace(/\D/g, '').length < 10}
-                  onClick={() => setOtpOpen(true)}
+                  disabled={!form.phone || form.phone.replace(/\D/g, '').length < 10 || otpLoading}
+                  onClick={handleGetOtp}
                   className={[
                     'px-3 py-1 rounded-lg border',
-                    'transition-opacity',
-                    (!form.phone || form.phone.replace(/\D/g, '').length < 10) ? 'opacity-50 cursor-not-allowed border-neutral-300 text-neutral-400' : 'opacity-100 border-(--color-primary) text-(--color-primary)'
+                    'transition-opacity text-sm whitespace-nowrap',
+                    (!form.phone || form.phone.replace(/\D/g, '').length < 10) ? 'opacity-50 cursor-not-allowed border-neutral-300 text-neutral-400' : 'opacity-100 border-[color:var(--color-primary)] text-[color:var(--color-primary)]'
                   ].join(' ')}
                 >
-                  Get OTP
+                  {otpVerified ? 'Verified' : otpLoading ? 'Wait...' : 'Get OTP'}
                 </button>
               }
             />
-            <Input label="Password" type="password" name="password" value={form.password} onChange={onChange} placeholder="••••••" error={errors.password} helperText="Demo: 123" />
-            
+            <Input label="Password" type="password" name="password" value={form.password} onChange={onChange} placeholder="••••••" error={errors.password} />
+
             <div className="flex items-center gap-2">
               <PrimaryButton
                 type="submit"
@@ -135,17 +192,18 @@ const Signup = () => {
                 Create Account
               </PrimaryButton>
             </div>
-            <div className="text-sm text-neutral-600">Already have an account? <Link className="text-(--color-primary)" to="/login">Login</Link></div>
+            <div className="text-sm text-neutral-600">Already have an account? <Link className="text-[color:var(--color-primary)] hover:underline" to="/login">Login</Link></div>
           </div>
+          <div id="recaptcha-container"></div>
         </form>
       </main>
       <Footer />
       <OTPModal
         open={otpOpen}
         onClose={() => setOtpOpen(false)}
-        onVerify={() => { setOtpVerified(true); setOtpOpen(false); }}
+        onVerify={handleVerifyOtp}
       />
-      <Toast open={toast} type="success" message="Account created (placeholder)" />
+      <Toast open={toast} type="success" message="Account created smoothly" />
     </div>
   )
 }
