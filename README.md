@@ -1,6 +1,6 @@
 # StitchUp
 
-Modern MERN app UI for finding nearby tailors, booking stitching/alterations, and tracking orders.
+Modern Firebase app for finding nearby tailors, booking stitching/alterations, and tracking orders.
 
 ## How to run
 
@@ -27,10 +27,13 @@ The app runs on http://localhost:5173 by default.
 ## Structure
 
 - Frontend/ – Vite React app (UI)
+- dataconnect/ - Firebase Data Connect (Database)
 - package.json (root) – proxies scripts to Frontend to avoid npm ENOENT at root
 - .gitignore – unified ignores
+- firebase.json - Firebase configuration
 
 ## Notes
 
-- Set environment variables in `Frontend/.env` (create from `.env.example` if needed).
+- Set environment variables in `Frontend/.env.local` (create from `sdkconfig.json` if needed).
 - Use `npm run build` (root) to build Frontend.
+

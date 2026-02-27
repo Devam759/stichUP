@@ -1,3 +1,0 @@
-cavDvD1Ah9CU9Xos
-parth2007bill_db_user
-mongodb+srv://parth2007bill_db_user:cavDvD1Ah9CU9Xos@cluster0.3x6lpv6.mongodb.net/
