@@ -1,56 +1,84 @@
-import express from "express";
-import Tailor from "../models/tailors.js";
+import express from 'express';
+import Tailor from '../models/tailors.js';
 
 const router = express.Router();
 
-// Search tailors near a point and return estimated time for selected type
-router.get("/search", async (req, res) => {
-  // query params: lat, lng, type (light|heavy)
-  const { lat, lng, type } = req.query;
-  const workType = type === "heavy" ? "heavy" : "light";
-  const avgField = workType === "heavy" ? "services.heavyAvgMins" : "services.lightAvgMins";
+// ─────────────────────────────────────────
+// GET /api/tailors/search
+// Query params: lat (float), lng (float), type ('light'|'heavy')
+// Returns up to 20 nearest tailors annotated with ETA
+// NOTE: route must be declared BEFORE /:id to avoid 'search' matching as an ObjectId
+// ─────────────────────────────────────────
+router.get('/search', async (req, res, next) => {
+  try {
+    const { lat, lng, type } = req.query;
+    const parsedLat = parseFloat(lat);
+    const parsedLng = parseFloat(lng);
 
-  // simple geoNear using $geoNear requires aggregation with a near point
-  const point = {
-    type: "Point",
-    coordinates: [parseFloat(lng) || 0, parseFloat(lat) || 0]
-  };
-
-  const tailors = await Tailor.aggregate([
-    {
-      $geoNear: {
-        near: point,
-        distanceField: "dist.calculated",
-        spherical: true,
-        limit: 20
-      }
-    },
-    {
-      $addFields: {
-        avgTime: { $ifNull: [ `$${avgField}`, 60 ] }
-      }
+    if (isNaN(parsedLat) || isNaN(parsedLng)) {
+      return res.status(400).json({ message: 'lat and lng query params are required and must be numbers' });
     }
-  ]);
 
-  // compute estimated time = (waitingListCount * avgTime) + avgTime
-  const list = tailors.map(t => ({
-    id: t._id,
-    name: t.name,
-    isAvailable: t.isAvailable,
-    waitingListCount: t.waitingListCount || 0,
-    estimatedMinutes: (t.waitingListCount || 0) * (t.avgTime || 60) + (t.avgTime || 60),
-    distanceMeters: t.dist?.calculated || 0,
-    rating: t.rating || 5
-  }));
+    const workType = type === 'heavy' ? 'heavy' : 'light';
+    const avgField = workType === 'heavy' ? '$services.heavyAvgMins' : '$services.lightAvgMins';
 
-  res.json(list);
+    const point = { type: 'Point', coordinates: [parsedLng, parsedLat] };
+
+    const tailors = await Tailor.aggregate([
+      {
+        $geoNear: {
+          near: point,
+          distanceField: 'dist.calculated',
+          spherical: true,
+          limit: 20
+        }
+      },
+      {
+        $addFields: {
+          avgTime: { $ifNull: [avgField, 60] }
+        }
+      },
+      {
+        $project: {
+          name: 1,
+          shopPhotoUrl: 1,
+          address: 1,
+          isAvailable: 1,
+          currentOrders: 1,
+          waitingListCount: 1,
+          rating: 1,
+          priceFrom: 1,
+          'services.labels': 1,
+          avgTime: 1,
+          distanceMeters: '$dist.calculated',
+          estimatedMinutes: {
+            $add: [
+              { $multiply: [{ $ifNull: ['$waitingListCount', 0] }, { $ifNull: [avgField, 60] }] },
+              { $ifNull: [avgField, 60] }
+            ]
+          }
+        }
+      }
+    ]);
+
+    res.json(tailors);
+  } catch (err) {
+    next(err);
+  }
 });
 
-// Get tailor profile
-router.get("/:id", async (req, res) => {
-  const t = await Tailor.findById(req.params.id);
-  if (!t) return res.status(404).json({ message: "Tailor not found" });
-  res.json(t);
+// ─────────────────────────────────────────
+// GET /api/tailors/:id
+// Returns full tailor profile
+// ─────────────────────────────────────────
+router.get('/:id', async (req, res, next) => {
+  try {
+    const tailor = await Tailor.findById(req.params.id);
+    if (!tailor) return res.status(404).json({ message: 'Tailor not found' });
+    res.json(tailor);
+  } catch (err) {
+    next(err);
+  }
 });
 
 export default router;
