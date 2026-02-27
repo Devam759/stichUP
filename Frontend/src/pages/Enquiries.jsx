@@ -111,6 +111,17 @@ const Enquiries = () => {
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+
+        // Guard: reject recordings that are too large for Firestore (1MB doc limit)
+        if (audioBlob.size > 600000) { // ~600KB raw → ~800KB base64
+          alert('Voice message too long. Please keep recordings under 60 seconds.')
+          stream.getTracks().forEach(track => track.stop())
+          setIsRecording(false)
+          setRecordingTime(0)
+          if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+          return
+        }
+
         const reader = new FileReader()
         reader.onloadend = async () => {
           const base64Audio = reader.result
@@ -302,10 +313,10 @@ const Enquiries = () => {
                     className={`flex ${msg.from === 'user' ? 'justify-end' : msg.from === 'system' ? 'justify-center' : 'justify-start'}`}
                   >
                     <div className={`max-w-[80%] px-3 py-2 rounded-lg text-sm ${msg.from === 'user'
-                        ? 'bg-[color:var(--color-primary)] text-white'
-                        : msg.from === 'system'
-                          ? 'text-neutral-500 text-xs bg-transparent'
-                          : 'bg-white border border-neutral-200'
+                      ? 'bg-[color:var(--color-primary)] text-white'
+                      : msg.from === 'system'
+                        ? 'text-neutral-500 text-xs bg-transparent'
+                        : 'bg-white border border-neutral-200'
                       }`}>
                       {msg.type === 'voice' ? (
                         <div className="flex items-center gap-2">

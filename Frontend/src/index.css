@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-@theme{
+@theme {
   --color-primary: #305cde;
   --color-accent: #305cde;
   --color-text: #0C0C0C;
@@ -9,19 +9,43 @@
   --font-display: "Poppins", var(--font-sans);
 }
 
-html, body, #root { height: 100%; }
-html { scroll-behavior: smooth; }
-body { @apply bg-white text-[color:var(--color-text)] font-sans; }
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-white text-[color:var(--color-text)] font-sans;
+}
 
 /* Reusable utility tokens */
-.btn-primary { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-white bg-[color:var(--color-primary)] hover:bg-[color:var(--color-accent)] transition-colors cursor-pointer; }
-.btn-outline { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 border border-neutral-200 text-[color:var(--color-text)] hover:border-[color:var(--color-primary)] hover:text-[color:var(--color-primary)] transition-colors cursor-pointer; }
-.btn-ghost { @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-[color:var(--color-text)] hover:bg-neutral-100 transition-colors cursor-pointer; }
-.card { @apply rounded-2xl border border-neutral-200 bg-white shadow-sm; }
-.shadow-soft { box-shadow: 0 10px 30px rgba(0,0,0,0.06); }
+.btn-primary {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-white bg-[color:var(--color-primary)] hover:bg-[color:var(--color-accent)] transition-colors cursor-pointer;
+}
+
+.btn-outline {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 border border-neutral-200 text-[color:var(--color-text)] hover:border-[color:var(--color-primary)] hover:text-[color:var(--color-primary)] transition-colors cursor-pointer;
+}
+
+.btn-ghost {
+  @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-[color:var(--color-text)] hover:bg-neutral-100 transition-colors cursor-pointer;
+}
+
+.card {
+  @apply rounded-2xl border border-neutral-200 bg-white shadow-sm;
+}
+
+.shadow-soft {
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+}
 
 /* Global cursor pointer for all clickable elements */
-button, 
+button,
 [role="button"],
 a[href],
 input[type="submit"],
@@ -30,4 +54,6 @@ label[for] {
   cursor: pointer;
 }
 
-::-webkit-scrollbar{display: none;}
+::-webkit-scrollbar {
+  display: none;
+}

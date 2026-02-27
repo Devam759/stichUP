@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth, connectAuthEmulator } from 'firebase/auth'
-import { getFirestore } from 'firebase/firestore'
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore'
 
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -16,8 +16,15 @@ const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 export const db = getFirestore(app)
 
-// Use the local emulator by default when not provided with keys & testing locally
-if (window.location.hostname === "localhost" && !import.meta.env.VITE_FIREBASE_API_KEY) {
-    connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true })
+// Connect to emulators on localhost for testing
+// Set VITE_USE_EMULATOR=false in .env to use live Firebase on localhost
+const useEmulator =
+    import.meta.env.VITE_USE_EMULATOR !== 'false' &&
+    window.location.hostname === 'localhost'
+
+if (useEmulator) {
+    connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true })
+    connectFirestoreEmulator(db, '127.0.0.1', 8080)
     auth.settings.appVerificationDisabledForTesting = true
+    console.info('[Firebase] Using Auth + Firestore emulators')
 }

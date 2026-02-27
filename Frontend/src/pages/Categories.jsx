@@ -2,12 +2,12 @@ import React from 'react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useNavigate, useParams } from 'react-router-dom'
+import { motion } from 'framer-motion'
 
 const Categories = () => {
   const navigate = useNavigate()
   const { type } = useParams()
 
-  // Quick fix categories - for simple repairs and alterations
   const quickFixCategories = [
     { id: 'shirt', name: 'Shirt', image: '/categories/shirt.png' },
     { id: 'pant', name: 'Pant', image: '/categories/pants.png' },
@@ -18,68 +18,60 @@ const Categories = () => {
     { id: 'other', name: 'Other', image: '/categories/others.png' },
   ]
 
-  // Heavy tailoring categories - for new garments and complex work
   const heavyTailoringCategories = [
-    { id: 'suit', name: 'Suit', image: '/categories/suit.png' }, // Using jacket image for suit
+    { id: 'suit', name: 'Suit', image: '/categories/suit.png' },
     { id: 'blazer', name: 'Blazer', image: '/categories/blazer.png' },
-    // { id: 'coat', name: 'Coat', image: '/categories/jacket.png' },
     { id: 'dress', name: 'Dress', image: '/categories/dress.png' },
-    { id: 'sherwani', name: 'Sherwani', image: '/categories/Shwerwani.png' }, // Using kurta image for sherwani
-    { id: 'lehenga', name: 'Lehenga', image: '/categories/Lehenga.png' }, // Using dress image for lehenga
+    { id: 'sherwani', name: 'Sherwani', image: '/categories/Shwerwani.png' },
+    { id: 'lehenga', name: 'Lehenga', image: '/categories/Lehenga.png' },
     { id: 'saree', name: 'Saree', image: '/categories/Saree_heavy.png' },
     { id: 'traditional', name: 'Traditional', image: '/categories/Traditional.png' },
     { id: 'other', name: 'Other', image: '/categories/others.png' },
   ]
 
-  // Use appropriate categories based on type
   const categories = type === 'heavy-tailoring' ? heavyTailoringCategories : quickFixCategories
+  const title = type === 'heavy-tailoring' ? 'Heavy Tailoring' : 'Quick Fix'
 
   const handleCategorySelect = (categoryId) => {
-    try {
-      localStorage.setItem('selectedCategory', categoryId)
-    } catch {}
-    
-    // Navigate based on type: quick-fix goes to quick-fix-options, heavy-tailoring goes to find
+    try { localStorage.setItem('selectedCategory', categoryId) } catch { }
     if (type === 'heavy-tailoring') {
-      try {
-        localStorage.setItem('workType', 'heavy')
-      } catch {}
+      try { localStorage.setItem('workType', 'heavy') } catch { }
       navigate(`/find?type=heavy&category=${categoryId}`)
     } else {
-      // Default to quick-fix behavior
       navigate(`/quick-fix-options?category=${categoryId}`)
     }
   }
 
   return (
-    <div className="min-h-dvh flex flex-col">
+    <div className="min-h-dvh flex flex-col bg-white">
       <Navbar />
-      <main className="flex-1 px-4 py-8">
-        <div className="max-w-4xl mx-auto">
-          <div className="p-6">
-            <h1 className="text-2xl md:text-3xl font-extrabold mb-2">Select Category</h1>
-            <div className="text-neutral-600 mb-6">Choose the type of garment you need help with</div>
+      <main className="flex-1 px-6 py-10">
+        <div className="max-w-5xl mx-auto">
+          <div className="mb-8">
+            <h1 className="text-2xl md:text-3xl font-bold text-neutral-900">Select Category</h1>
+            <p className="mt-2 text-neutral-500">{title} — Choose the type of garment you need help with</p>
+          </div>
 
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mt-6">
-              {categories.map((category) => (
-                <button
-                  key={category.id}
-                  onClick={() => handleCategorySelect(category.id)}
-                  className="rounded-xl border border-neutral-200 overflow-hidden text-left hover:border-[color:var(--color-primary)] transition-all hover:shadow-md flex flex-col h-full"
-                >
-                  <div className="flex-1 min-h-[200px] overflow-hidden">
-                    <img 
-                      src={category.image} 
-                      alt={category.name} 
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <div className="p-4">
-                    <div className="text-lg font-semibold">{category.name}</div>
-                  </div>
-                </button>
-              ))}
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            {categories.map((cat, i) => (
+              <motion.button
+                key={cat.id}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.04 }}
+                whileHover={{ y: -2 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={() => handleCategorySelect(cat.id)}
+                className="rounded-xl border border-neutral-200 overflow-hidden text-left hover:border-neutral-300 hover:shadow-sm transition-all group"
+              >
+                <div className="aspect-[4/5] bg-neutral-100 overflow-hidden">
+                  <img src={cat.image} alt={cat.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                </div>
+                <div className="p-3">
+                  <div className="font-semibold text-neutral-900 text-sm">{cat.name}</div>
+                </div>
+              </motion.button>
+            ))}
           </div>
         </div>
       </main>
@@ -89,4 +81,3 @@ const Categories = () => {
 }
 
 export default Categories
-

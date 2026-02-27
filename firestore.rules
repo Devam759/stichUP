@@ -2,13 +2,34 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allows anyone to read and write to the chat module
-    match /chats/{jobId}/messages/{messageId} {
-      allow read, write: if true;
+    // Users collection: authenticated users can read any profile,
+    // but can only write their own document.
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if false;
     }
-    // General access rule for prototyping. NOT securely locked for production.
-    match /{document=**} {
-      allow read, write: if true;
+
+    // Orders: authenticated users can read and create.
+    // Only the order's customer or tailor can update.
+    match /orders/{orderId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update: if request.auth != null
+        && (resource.data.userId == request.auth.uid
+            || resource.data.tailorId == request.auth.uid);
+      allow delete: if false;
+    }
+
+    // Enquiries (chat): authenticated users can read/write.
+    match /enquiries/{docId} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Chat module
+    match /chats/{jobId}/messages/{messageId} {
+      allow read, write: if request.auth != null;
     }
   }
 }

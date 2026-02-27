@@ -10,7 +10,7 @@ import { db } from '../firebase'
 
 
 const FindTailor = () => {
-  const [query, setQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [workType, setWorkType] = useState('quick') // quick | heavy
   const [hovered, setHovered] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -59,7 +59,7 @@ const FindTailor = () => {
 
   const list = useMemo(() => {
     let filtered = allTailors.filter(t => {
-      if (query && !t.name.toLowerCase().includes(query.toLowerCase())) return false
+      if (searchQuery && !t.name.toLowerCase().includes(searchQuery.toLowerCase())) return false
       if (filters.availability === 'available' && !t.isAvailable) return false
       if (filters.availability === 'busy' && t.isAvailable) return false
       if (t.rating < filters.minRating) return false
@@ -76,7 +76,7 @@ const FindTailor = () => {
     })
 
     return filtered
-  }, [allTailors, query, filters])
+  }, [allTailors, searchQuery, filters])
 
   // (Timer removed because Firestore natively sets loading status)
   return (
@@ -88,8 +88,8 @@ const FindTailor = () => {
             <div className="flex items-center gap-2 bg-white rounded-xl border border-neutral-200 px-3 py-2 shadow-soft">
               <FiSearch className="text-neutral-500" />
               <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search tailors by name"
                 className="flex-1 outline-none bg-transparent"
               />
