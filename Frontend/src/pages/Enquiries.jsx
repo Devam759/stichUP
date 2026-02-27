@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import Navbar from '../components/Navbar'
 import Footer from '../components/Footer'
 import { useSearchParams, Link } from 'react-router-dom'
-import { collection, query, where, getDocs, doc, onSnapshot, setDoc } from 'firebase/firestore'
+import { collection, query, where, doc, onSnapshot, setDoc, updateDoc, arrayUnion } from 'firebase/firestore'
 import { db } from '../firebase'
 
 const Enquiries = () => {
@@ -44,7 +44,8 @@ const Enquiries = () => {
     const customerId = getCustomerId()
     if (!customerId) return
 
-    const docId = `${customerId}_${tailorId}`
+    // Doc ID convention: tailorId_customerId  (matches what TailorProfile creates)
+    const docId = `${tailorId}_${customerId}`
     const unsub = onSnapshot(doc(db, 'enquiries', docId), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data()
@@ -66,34 +67,33 @@ const Enquiries = () => {
     }
   }, [messages])
 
-  const sendToFirestore = async (msgsArray) => {
+  const sendToFirestore = async (msg) => {
     const customerId = getCustomerId()
     if (!customerId) return
-    const docId = `${customerId}_${tailorId}`
+    const docId = `${tailorId}_${customerId}`
+    // Ensure doc exists with metadata, then append the single message
     await setDoc(doc(db, 'enquiries', docId), {
       customerId,
       customerName: getCustomerName(),
       tailorId,
       tailorName,
-      messages: msgsArray,
       lastUpdated: new Date().toISOString(),
       isOnline
     }, { merge: true })
+    await updateDoc(doc(db, 'enquiries', docId), { messages: arrayUnion(msg) })
   }
 
   const sendMessage = async () => {
     if (!chatInput.trim()) return
-
-    const newMessage = {
+    const msg = {
       id: Date.now(),
-      from: 'user',
+      from: 'customer',
+      fromName: getCustomerName(),
       text: chatInput.trim(),
-      createdAt: new Date().toISOString()
+      sentAt: new Date().toISOString()
     }
-
-    const newMsgs = [...messages, newMessage]
     setChatInput('')
-    await sendToFirestore(newMsgs)
+    await sendToFirestore(msg)
   }
 
   const startRecording = async () => {
@@ -114,22 +114,19 @@ const Enquiries = () => {
         const reader = new FileReader()
         reader.onloadend = async () => {
           const base64Audio = reader.result
-
           const voiceMessage = {
             id: Date.now(),
-            from: 'user',
+            from: 'customer',
             type: 'voice',
             audioUrl: base64Audio,
             duration: recordingTime,
-            createdAt: new Date().toISOString()
+            sentAt: new Date().toISOString()
           }
-
           stream.getTracks().forEach(track => track.stop())
           setIsRecording(false)
           setRecordingTime(0)
           if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
-
-          await sendToFirestore([...messages, voiceMessage])
+          await sendToFirestore(voiceMessage)
         }
         reader.readAsDataURL(audioBlob)
       }
@@ -162,24 +159,19 @@ const Enquiries = () => {
 
   // Load all enquiries for list view
   useEffect(() => {
-    if (tailorId) return // only fetch if on the master layout
+    if (tailorId) return
     const customerId = getCustomerId()
     if (!customerId) return
-
-    const fetchAll = async () => {
-      try {
-        const q = query(collection(db, 'enquiries'), where('customerId', '==', customerId))
-        const unsub = onSnapshot(q, (snapshot) => {
-          let list = snapshot.docs.map(doc => doc.data())
-          list.sort((a, b) => new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0))
-          setAllEnquiries(list)
-        })
-        return () => unsub()
-      } catch (error) {
-        console.error('Error loading enquiries:', error)
-      }
-    }
-    fetchAll()
+    const unsub = onSnapshot(
+      query(collection(db, 'enquiries'), where('customerId', '==', customerId)),
+      (snapshot) => {
+        let list = snapshot.docs.map(d => d.data())
+        list.sort((a, b) => new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0))
+        setAllEnquiries(list)
+      },
+      (err) => console.error('Load enquiries error:', err)
+    )
+    return unsub
   }, [tailorId])
 
   // Cleanup recording on unmount
@@ -292,31 +284,25 @@ const Enquiries = () => {
               className="h-96 overflow-y-auto mb-4 bg-neutral-50 border border-neutral-200 rounded-lg p-4 space-y-3"
             >
               {messages.length === 0 ? (
-                <div className="text-center text-neutral-500 py-8">
-                  No messages yet. Start the conversation!
-                </div>
+                <div className="text-center text-neutral-500 py-8">No messages yet. Start the conversation!</div>
               ) : (
-                messages.map((msg) => (
+                messages.map((msg, i) => (
                   <div
-                    key={msg.id}
-                    className={`flex ${msg.from === 'user' ? 'justify-end' : msg.from === 'system' ? 'justify-center' : 'justify-start'}`}
+                    key={msg.id || i}
+                    className={`flex ${msg.from === 'customer' ? 'justify-end' : msg.from === 'system' ? 'justify-center' : 'justify-start'}`}
                   >
-                    <div className={`max-w-[80%] px-3 py-2 rounded-lg text-sm ${msg.from === 'user'
-                        ? 'bg-[color:var(--color-primary)] text-white'
-                        : msg.from === 'system'
-                          ? 'text-neutral-500 text-xs bg-transparent'
-                          : 'bg-white border border-neutral-200'
-                      }`}>
+                    <div className={[
+                      'max-w-[80%] px-3 py-2 rounded-2xl text-sm',
+                      msg.from === 'customer' ? 'bg-[color:var(--color-primary)] text-white rounded-br-sm' :
+                        msg.type === 'system' ? 'text-xs text-neutral-500 bg-green-50 border border-green-200 text-center' :
+                          'bg-white border border-neutral-200 rounded-bl-sm'
+                    ].join(' ')}>
                       {msg.type === 'voice' ? (
                         <div className="flex items-center gap-2">
-                          <audio controls src={msg.audioUrl} className="max-w-full">
-                            Your browser does not support the audio element.
-                          </audio>
+                          <audio controls src={msg.audioUrl} className="max-w-full" />
                           <span className="text-xs opacity-75">{formatTime(msg.duration || 0)}</span>
                         </div>
-                      ) : (
-                        msg.text
-                      )}
+                      ) : msg.text}
                     </div>
                   </div>
                 ))
